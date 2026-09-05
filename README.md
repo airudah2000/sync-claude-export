@@ -67,6 +67,59 @@ stays intentionally high-level so it doesn't go stale as those steps evolve.
   real logged-in browser session. (macOS/Linux paths are implemented but not yet verified
   against a real export on those platforms — see open issues if you hit something.)
 
+## Keeping your archive up to date
+
+There's no automated reminder to re-export — claude.ai's export trigger (Settings →
+Privacy → Export Data) has no API, so it can't be scheduled from inside this skill, and a
+Claude Code scheduled job can't durably cover a monthly cadence either (jobs are
+session-only and recurring ones auto-expire after 7 days). The practical answer is a
+manual one: **set your own recurring reminder** (calendar, to-do app, whatever you already
+use) to re-trigger the export every so often and re-run this skill — it's safe to run
+repeatedly, since re-parsing updates existing entries in place instead of duplicating them.
+
+## FAQ / Troubleshooting
+
+**Gmail search finds zero matching threads.**
+Most likely causes, in order: you haven't actually clicked Export Data yet (or the email
+hasn't arrived — it can take a few hours), the email landed in Spam/Promotions, or Gmail
+MCP is connected to a different account than the one you exported from. Check Spam before
+anything else.
+
+**The Gmail or `claude-in-chrome` connector doesn't show up in `/mcp` at all.**
+Both require claude.ai subscription login (`/login`), not `ANTHROPIC_API_KEY` auth — see
+Prerequisites above. If you have an API key set, unset it and re-authenticate.
+
+**Opening the download link just shows an HTML/login page instead of downloading a zip
+(`FALLBACK_NEEDED`).**
+Expected on some accounts (e.g. certain SSO setups) — this isn't a bug. Ask Claude to fall
+back to the manual path: download the file yourself from the link in the email and hand
+Claude the file path.
+
+**The download link says it's expired, or nothing downloads.**
+The link expires 24 hours after the "ready for download" email arrives, and each of the 5
+per-category links is single-use. Re-trigger a fresh export and start over — there's no way
+to recover an expired link.
+
+**`config.json` fails to parse / Claude says it can't read the config.**
+Almost always a Windows backslash path typed with single backslashes into JSON (`\U` etc.
+isn't a valid escape). Use forward slashes instead, e.g. `"C:/Users/you/ClaudeAI-Sync/raw"`
+— `parse_export.py` uses `pathlib`, which accepts these fine on any OS.
+
+**A conversation got tagged with a `related_projects` entry that's clearly wrong.**
+That field is explicitly a heuristic guess (a project name mentioned somewhere in the
+conversation), not a confirmed link — it's normal for it to occasionally flag an incidental
+mention. It's never used to move or merge files, only to annotate. See issue tracker for
+the matching logic's known limitations.
+
+**Two projects/design-chats share the same name — did one overwrite the other?**
+No — folders are suffixed with each project's own short ID specifically to prevent this
+(`projects/<slug>-<id>/`), verified against real exports with zero collisions.
+
+**Where should I actually put this skill folder?**
+`~/.claude/skills/sync-claude-export/` (user-level) if you want it usable from any
+project, which is almost always what you want for an account-wide sync tool. A specific
+project's `.claude/skills/` only if you deliberately want it scoped to that one project.
+
 ## Privacy
 
 The generated archive contains your real personal conversation history. `config.json`
@@ -77,5 +130,5 @@ too; it isn't meant to be checked in anywhere.
 ## Known limitations & roadmap
 
 Tracked as [GitHub Issues](https://github.com/airudah2000/sync-claude-export/issues) —
-currently a recurring re-export reminder and, for environments with no MCP host at all, an
-isolated Playwright-based download fallback.
+currently just verifying macOS/Linux support on real hardware, since development so far has
+been Windows-only.
