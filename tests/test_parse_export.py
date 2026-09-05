@@ -90,6 +90,45 @@ class TestManifestUpsert(unittest.TestCase):
         self.assertEqual(status, "updated")
 
 
+class TestFindRelatedProjects(unittest.TestCase):
+    def setUp(self):
+        self.patterns = pe.compile_project_patterns([
+            ("p1", "RMAS"),
+            ("p2", "My professional profile"),
+        ])
+
+    def test_short_name_single_incidental_mention_in_turns_is_ignored(self):
+        # Real false positive this was written to fix: a short/acronym-like
+        # name appearing once, only deep in the conversation, not the title
+        # or summary -- should NOT be flagged.
+        related = pe.find_related_projects(
+            "Immigration strategy", "", "My SC clearance came via RMAS work.", self.patterns)
+        self.assertNotIn("RMAS", related)
+
+    def test_short_name_repeated_mentions_in_turns_is_flagged(self):
+        text = "RMAS prep continues. RMAS interview next week. Studying RMAS syllabus."
+        related = pe.find_related_projects("Sandhurst prep", "", text, self.patterns)
+        self.assertIn("RMAS", related)
+
+    def test_short_name_in_title_is_flagged_on_single_mention(self):
+        related = pe.find_related_projects("RMAS interview prep", "", "one mention here", self.patterns)
+        self.assertIn("RMAS", related)
+
+    def test_long_name_single_mention_in_turns_is_flagged(self):
+        related = pe.find_related_projects(
+            "Career chat", "", "Let's update My professional profile with this.", self.patterns)
+        self.assertIn("My professional profile", related)
+
+    def test_word_boundary_prevents_substring_match(self):
+        patterns = pe.compile_project_patterns([("p3", "Sky")])
+        related = pe.find_related_projects("Skydiving trip", "", "Skydiving was fun, skyscrapers too.", patterns)
+        self.assertEqual(related, [])
+
+    def test_excluded_name_never_returned(self):
+        related = pe.find_related_projects("RMAS RMAS RMAS", "", "", self.patterns, exclude_name="RMAS")
+        self.assertNotIn("RMAS", related)
+
+
 class TestDesignChatsParsing(unittest.TestCase):
     def _write_chat(self, chats_dir, filename, uuid, title, project_name, project_uuid, messages):
         chat = {

@@ -117,17 +117,39 @@ def design_chat_project_folder(name, pid):
     return Path("design-chats") / f"{slugify(name)}-{str(pid)[:8]}"
 
 
-def find_related_projects(text, project_names, exclude_name=None):
-    """Heuristic only: case-insensitive substring match of each known project
-    name against conversation text. Not a hard link (conversations.json carries
-    no project id at all) -- flags a *possible* mention for a human to judge,
-    never used to move/group the file itself."""
-    if not text:
-        return []
-    lower = text.lower()
-    hits = []
+def compile_project_patterns(project_names):
+    """Precompiles a word-boundary regex per known project name once, instead
+    of rebuilding/rescanning per conversation."""
+    patterns = []
     for _, name in project_names:
-        if name and name != exclude_name and len(name) >= 4 and name.lower() in lower:
+        if name and len(name) >= 4:
+            patterns.append((name, re.compile(r"\b" + re.escape(name.lower()) + r"\b")))
+    return patterns
+
+
+def find_related_projects(title, summary, turns_text, project_patterns, exclude_name=None):
+    """Heuristic only: word-boundary match of each known project name against
+    conversation text, weighted by where the match falls. Not a hard link
+    (conversations.json carries no project id at all) -- flags a *possible*
+    mention for a human to judge, never used to move/group the file itself.
+
+    A match in the title or summary is a strong signal -- one hit is enough.
+    A match only inside the turn text is weaker: short, acronym-like names
+    (<8 chars, e.g. "RMAS") need 3+ mentions there to count, since a single
+    incidental mention (e.g. via an unrelated SC-clearance/military-service
+    context) was observed to produce a false positive against real data;
+    longer, more distinctive project names need only one."""
+    strong_text = f"{title}\n{summary}".lower()
+    weak_text = turns_text.lower()
+    hits = []
+    for name, pattern in project_patterns:
+        if name == exclude_name:
+            continue
+        if pattern.search(strong_text):
+            hits.append(name)
+            continue
+        min_occurrences = 1 if len(name) >= 8 else 3
+        if len(pattern.findall(weak_text)) >= min_occurrences:
             hits.append(name)
     return sorted(set(hits))
 
@@ -306,6 +328,7 @@ def cmd_parse_conversations(args):
     manifest_path = Path(args.manifest)
     manifest = load_manifest(manifest_path)
     project_names = load_project_names(args.projects_dir) if args.projects_dir else []
+    project_patterns = compile_project_patterns(project_names)
 
     conversations = json.loads(Path(args.json).read_text(encoding="utf-8"))
     if isinstance(conversations, dict):
@@ -318,8 +341,9 @@ def cmd_parse_conversations(args):
         rel_dir = Path("projects") / slugify(fields["project"]) if fields["project"] else Path("standalone")
         rel_path = rel_dir / f"{slugify(fields['title'])}-{fields['id'][:8]}.md"
 
-        haystack = fields["title"] + "\n" + (convo.get("summary") or "") + "\n" + "\n".join(t["text"] for t in fields["turns"])
-        related = find_related_projects(haystack, project_names, exclude_name=fields["project"])
+        turns_text = "\n".join(t["text"] for t in fields["turns"])
+        related = find_related_projects(fields["title"], convo.get("summary") or "", turns_text,
+                                          project_patterns, exclude_name=fields["project"])
 
         status = manifest_upsert(manifest, key, fields["title"], fields["project"], "claude.ai",
                                   fields["created"], fields["updated"], rel_path, related)
