@@ -1,17 +1,36 @@
 # sync-claude-export
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A [Claude Code](https://claude.com/claude-code) skill that gives Claude Code visibility
 into history it otherwise can't see at all: your **claude.ai** conversations, Projects,
-and memories (especially useful if you use claude.ai mostly via the mobile app, which has
-no export or API access whatsoever), plus your **local Claude Code session history**
-across every project on this machine. Both directions get parsed into one unified,
-searchable local markdown archive — greppable, browsable, and safe to point Claude Code
-at in future sessions.
+and memories, plus your **local Claude Code session history** across every project on
+this machine — both parsed into one unified, searchable local markdown archive.
 
-This is a **one-way sync only**. It builds a local archive *from* claude.ai's official
-data export and *from* local Claude Code `.jsonl` session transcripts. Nothing here pushes
-data back into claude.ai or the mobile app — there's no supported API for that direction,
-and this project doesn't attempt to work around that.
+## Table of Contents
+
+- [Why this exists](#why-this-exists)
+- [What it does](#what-it-does)
+- [Prerequisites & Requirements](#prerequisites--requirements)
+- [Quick start](#quick-start)
+- [Keeping your archive up to date](#keeping-your-archive-up-to-date)
+- [FAQ / Troubleshooting](#faq--troubleshooting)
+- [Known limitations & roadmap](#known-limitations--roadmap)
+- [Privacy](#privacy)
+- [License](#license)
+
+## Why this exists
+
+If you use claude.ai mostly through the mobile app, Claude Code has zero visibility into
+any of it — no conversations, no Projects, no memories, and no way to get them, since the
+mobile app has no export or API access whatsoever. And even Claude Code's own history isn't
+much better off: session transcripts are scattered across every project directory on your
+machine with no unified, searchable view.
+
+This project closes both gaps at once. It builds a **one-way sync only** — a local archive
+*from* claude.ai's official data export and *from* local Claude Code `.jsonl` session
+transcripts. Nothing pushes data back into claude.ai or the mobile app; there's no supported
+API for that direction, and this project doesn't attempt to work around that.
 
 ## What it does
 
@@ -27,17 +46,26 @@ and this project doesn't attempt to work around that.
 - Both feed the same `manifest.json` + `index.md`, so re-running after a later export
   updates entries in place instead of duplicating them.
 
-## Prerequisites
+```mermaid
+flowchart LR
+    subgraph claude.ai
+        A[Data Export] --> B[raw/]
+    end
+    subgraph "This machine"
+        C["~/.claude/projects/*.jsonl"] --> D[parsed/]
+        B --> D
+    end
+    D --> E[index.md + manifest.json]
+```
 
-- **You must be logged into Claude Code via a claude.ai subscription (Pro/Max/Team/
-  Enterprise), not a bare `ANTHROPIC_API_KEY`.** The Gmail and `claude-in-chrome`
-  connectors this skill uses are Anthropic-hosted connectors that only load when
-  authenticated through claude.ai's own OAuth (`/login`) — they don't appear at all under
-  pure API-key auth, even with a key set alongside a login. If `ANTHROPIC_API_KEY` is set
-  in your environment, unset it, run `/login`, then check `/mcp` lists both connectors
-  before running this skill.
-- Python 3 on your `PATH` as `python` or `python3` — `scripts/parse_export.py` is
-  stdlib-only (`argparse`, `json`, `urllib`, `zipfile`, `pathlib`), no pip installs needed.
+## Prerequisites & Requirements
+
+| Requirement | Why |
+|---|---|
+| Claude Code logged in via a claude.ai subscription (Pro/Max/Team/Enterprise) — **not** a bare `ANTHROPIC_API_KEY` | The Gmail and `claude-in-chrome` connectors this skill uses only load under claude.ai's own OAuth (`/login`); they don't appear at all under pure API-key auth. If you have an API key set, unset it, run `/login`, then check `/mcp` lists both connectors. |
+| Python 3 on your `PATH` as `python` or `python3` | Runs `scripts/parse_export.py`, which is stdlib-only (`argparse`, `json`, `urllib`, `zipfile`, `pathlib`) — no pip installs needed. |
+| **Gmail MCP connector** | Locates the "your data is ready for download" email. |
+| **claude-in-chrome MCP connector**, or PowerShell (`Start-Process`) / `open` (macOS) / `xdg-open` (Linux) | Opens the export's one-time download links in a real logged-in browser session. macOS/Linux paths are implemented but not yet verified against a real export on those platforms — see [open issues](https://github.com/airudah2000/sync-claude-export/issues) if you hit something. |
 
 ## Quick start
 
@@ -59,66 +87,56 @@ and this project doesn't attempt to work around that.
 See `SKILL.md` for the authoritative, exact step-by-step Claude Code follows — this README
 stays intentionally high-level so it doesn't go stale as those steps evolve.
 
-## Requirements
-
-- Everything under **Prerequisites** above.
-- Either **PowerShell** (`Start-Process`) / `open` (macOS) / `xdg-open` (Linux), or the
-  **claude-in-chrome MCP connector**, to open the export's one-time download links in a
-  real logged-in browser session. (macOS/Linux paths are implemented but not yet verified
-  against a real export on those platforms — see open issues if you hit something.)
-
 ## Keeping your archive up to date
 
-There's no automated reminder to re-export — claude.ai's export trigger (Settings →
-Privacy → Export Data) has no API, so it can't be scheduled from inside this skill, and a
-Claude Code scheduled job can't durably cover a monthly cadence either (jobs are
-session-only and recurring ones auto-expire after 7 days). The practical answer is a
-manual one: **set your own recurring reminder** (calendar, to-do app, whatever you already
-use) to re-trigger the export every so often and re-run this skill — it's safe to run
-repeatedly, since re-parsing updates existing entries in place instead of duplicating them.
+There's no automated reminder to re-export — claude.ai's export trigger has no API, so it
+can't be scheduled from inside this skill, and a Claude Code scheduled job can't durably
+cover a monthly cadence either (jobs are session-only and recurring ones auto-expire after
+7 days). The practical answer is manual: **set your own recurring reminder** to re-trigger
+the export and re-run this skill. It's safe to run repeatedly — re-parsing updates existing
+entries in place instead of duplicating them.
 
 ## FAQ / Troubleshooting
 
 **Gmail search finds zero matching threads.**
-Most likely causes, in order: you haven't actually clicked Export Data yet (or the email
-hasn't arrived — it can take a few hours), the email landed in Spam/Promotions, or Gmail
-MCP is connected to a different account than the one you exported from. Check Spam before
-anything else.
+Check, in order: the export hasn't actually been triggered yet (or the email hasn't arrived
+— it can take a few hours), the email landed in Spam/Promotions, or Gmail MCP is connected
+to a different account than the one you exported from.
 
 **The Gmail or `claude-in-chrome` connector doesn't show up in `/mcp` at all.**
-Both require claude.ai subscription login (`/login`), not `ANTHROPIC_API_KEY` auth — see
-Prerequisites above. If you have an API key set, unset it and re-authenticate.
+Both require claude.ai subscription login (`/login`), not API-key auth — see
+[Prerequisites](#prerequisites--requirements). Unset `ANTHROPIC_API_KEY` and re-authenticate.
 
-**Opening the download link just shows an HTML/login page instead of downloading a zip
-(`FALLBACK_NEEDED`).**
-Expected on some accounts (e.g. certain SSO setups) — this isn't a bug. Ask Claude to fall
-back to the manual path: download the file yourself from the link in the email and hand
-Claude the file path.
+**Opening the download link just shows an HTML/login page (`FALLBACK_NEEDED`).**
+Not a bug — expected on some accounts (e.g. certain SSO setups). Ask Claude to fall back to
+the manual path: download the file yourself from the email link and hand Claude the path.
 
 **The download link says it's expired, or nothing downloads.**
-The link expires 24 hours after the "ready for download" email arrives, and each of the 5
-per-category links is single-use. Re-trigger a fresh export and start over — there's no way
-to recover an expired link.
+Links expire 24 hours after the "ready for download" email, and each of the 5 per-category
+links is single-use. Re-trigger a fresh export and start over.
 
-**`config.json` fails to parse / Claude says it can't read the config.**
-Almost always a Windows backslash path typed with single backslashes into JSON (`\U` etc.
-isn't a valid escape). Use forward slashes instead, e.g. `"C:/Users/you/ClaudeAI-Sync/raw"`
-— `parse_export.py` uses `pathlib`, which accepts these fine on any OS.
+**`config.json` fails to parse.**
+Almost always a Windows path typed with single backslashes into JSON. Use forward slashes:
+`"C:/Users/you/ClaudeAI-Sync/raw"` — `pathlib` accepts these fine on any OS.
 
-**A conversation got tagged with a `related_projects` entry that's clearly wrong.**
-That field is explicitly a heuristic guess (a project name mentioned somewhere in the
-conversation), not a confirmed link — it's normal for it to occasionally flag an incidental
-mention. It's never used to move or merge files, only to annotate. See issue tracker for
-the matching logic's known limitations.
+**A conversation got tagged with a wrong `related_projects` entry.**
+That field is an explicit heuristic guess, not a confirmed link — occasional incidental
+matches are expected and never move or merge files, only annotate.
 
-**Two projects/design-chats share the same name — did one overwrite the other?**
-No — folders are suffixed with each project's own short ID specifically to prevent this
-(`projects/<slug>-<id>/`), verified against real exports with zero collisions.
+**Two projects/design-chats share a name — did one overwrite the other?**
+No — folders are suffixed with each project's own short ID specifically to prevent this,
+verified against real exports with zero collisions.
 
-**Where should I actually put this skill folder?**
-`~/.claude/skills/sync-claude-export/` (user-level) if you want it usable from any
-project, which is almost always what you want for an account-wide sync tool. A specific
-project's `.claude/skills/` only if you deliberately want it scoped to that one project.
+**Where should I put this skill folder?**
+`~/.claude/skills/sync-claude-export/` (user-level) for use from any project — almost
+always what you want for an account-wide sync tool. A project's own `.claude/skills/` only
+if you deliberately want it scoped to that one project.
+
+## Known limitations & roadmap
+
+Tracked as [GitHub Issues](https://github.com/airudah2000/sync-claude-export/issues) —
+currently just verifying macOS/Linux support on real hardware, since development so far has
+been Windows-only.
 
 ## Privacy
 
@@ -127,8 +145,6 @@ The generated archive contains your real personal conversation history. `config.
 If the archive folder itself ever ends up inside a git repo for any reason, gitignore it
 too; it isn't meant to be checked in anywhere.
 
-## Known limitations & roadmap
+## License
 
-Tracked as [GitHub Issues](https://github.com/airudah2000/sync-claude-export/issues) —
-currently just verifying macOS/Linux support on real hardware, since development so far has
-been Windows-only.
+[MIT](LICENSE)
