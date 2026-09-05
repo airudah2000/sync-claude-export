@@ -12,26 +12,21 @@ Builds and maintains a local markdown archive covering both directions of Claude
 Note: nothing in this skill pushes data back into claude.ai or the mobile app -- that
 direction has no supported API and isn't possible today. This only builds a local archive.
 
-All logic lives in `scripts/parse_export.py`, run with `python` (already confirmed
-available in this environment). This file tells Claude what to do and in what order.
+All logic lives in `scripts/parse_export.py`. Run it with whichever of `python` / `python3`
+actually resolves to a Python 3 interpreter on this machine -- check with `python --version`
+/ `python3 --version` if unsure, don't assume. This file tells Claude what to do and in
+what order.
 
 ## First run: confirm storage location
 
-Confirm with the user where the archive should live (default suggestion:
-`C:\Users\Robert\Documents\ClaudeAI-Sync\`, with `raw\` and `parsed\` subfolders), then
-record it in `config.json` next to this file:
-
-```json
-{ "raw_dir": "C:\\...\\ClaudeAI-Sync\\raw", "parsed_dir": "C:\\...\\ClaudeAI-Sync\\parsed" }
-```
+Confirm with the user where the archive should live (a folder *outside* any git repo,
+e.g. `~/ClaudeAI-Sync/` or `Documents/ClaudeAI-Sync/`, with `raw/` and `parsed/`
+subfolders), then record it in `config.json` next to this file -- copy `config.example.json`
+to `config.json` and fill in the real paths (forward slashes work fine even on Windows and
+sidestep JSON backslash-escaping mistakes, e.g. `"C:/Users/you/ClaudeAI-Sync/raw"`).
 
 On later runs, read `config.json` instead of asking again. The archive holds personal
 conversation history -- if it ever ends up inside a git repo, make sure it's gitignored.
-
-Paths throughout this file are shown in Windows backslash style as illustration only --
-`parse_export.py` uses Python's `pathlib` internally, which accepts forward slashes
-equally well on any OS. On macOS/Linux, use forward-slash paths (e.g.
-`~/ClaudeAI-Sync/raw`) instead.
 
 ## Part A: claude.ai export -> archive
 
@@ -44,7 +39,13 @@ equally well on any OS. On macOS/Linux, use forward-slash paths (e.g.
 2. **Find the ready email.** Gmail MCP `search_threads`:
    `from:anthropic.com OR from:claude.ai (export OR "data export" OR "your data") newer_than:2d`
    (fallback: `from:anthropic.com newer_than:1d`). If more than one plausible thread comes
-   back, show the candidates to the user.
+   back, show the candidates to the user. **If zero threads come back**, don't assume
+   something's broken -- the most common causes are the export not actually being triggered
+   yet, the email landing in Spam/Promotions, or Gmail MCP not being connected to the
+   expected account. Ask the user to double check Settings -> Privacy -> Export Data was
+   clicked and to check Spam, before troubleshooting anything else. If the Gmail MCP tool
+   itself isn't available at all (connector not connected), skip straight to asking the user
+   to paste the "Download data" link directly from the email themselves.
 
 3. **Extract the "Download data" link.** `get_thread` on the chosen thread, then find the
    `https://claude.ai/export/.../download/...` URL in the body (it's the "Download data"

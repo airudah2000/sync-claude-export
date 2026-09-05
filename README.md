@@ -27,28 +27,45 @@ and this project doesn't attempt to work around that.
 - Both feed the same `manifest.json` + `index.md`, so re-running after a later export
   updates entries in place instead of duplicating them.
 
+## Prerequisites
+
+- **You must be logged into Claude Code via a claude.ai subscription (Pro/Max/Team/
+  Enterprise), not a bare `ANTHROPIC_API_KEY`.** The Gmail and `claude-in-chrome`
+  connectors this skill uses are Anthropic-hosted connectors that only load when
+  authenticated through claude.ai's own OAuth (`/login`) — they don't appear at all under
+  pure API-key auth, even with a key set alongside a login. If `ANTHROPIC_API_KEY` is set
+  in your environment, unset it, run `/login`, then check `/mcp` lists both connectors
+  before running this skill.
+- Python 3 on your `PATH` as `python` or `python3` — `scripts/parse_export.py` is
+  stdlib-only (`argparse`, `json`, `urllib`, `zipfile`, `pathlib`), no pip installs needed.
+
 ## Quick start
 
-1. Copy this whole folder into `.claude/skills/sync-claude-export/` in whichever project
-   root your Claude Code skill discovery is rooted at (or wherever you keep shared skills).
-2. Copy `config.example.json` to `config.json` and fill in real `raw_dir` / `parsed_dir`
-   paths for where you want the archive to live — a folder *outside* any git repo.
+1. Install the skill so it's available in every project, not just one repo — copy this
+   whole folder to `~/.claude/skills/sync-claude-export/` (user-level skills apply across
+   all your Claude Code sessions; a user-level skill also takes precedence over a
+   project-level one of the same name). Copying it into a single project's
+   `.claude/skills/` instead works too, but then it's only usable from that one project.
+2. Copy `config.example.json` to `config.json` (same folder) and fill in real `raw_dir` /
+   `parsed_dir` paths for where you want the archive to live — a folder *outside* any git
+   repo. Forward slashes work fine even on Windows and avoid JSON backslash-escaping
+   mistakes (e.g. `"C:/Users/you/ClaudeAI-Sync/raw"`).
 3. Trigger a claude.ai data export (Settings → Privacy → Export Data — web/desktop only,
    not available from the mobile app) and then just ask Claude Code to run the
    `sync-claude-export` skill. It handles finding the export-ready email, downloading each
-   category, and parsing everything into the archive.
+   category, and parsing everything into the archive. **Run the skill the same day** —
+   the emailed download link expires 24 hours after delivery.
 
 See `SKILL.md` for the authoritative, exact step-by-step Claude Code follows — this README
 stays intentionally high-level so it doesn't go stale as those steps evolve.
 
 ## Requirements
 
-- Python 3, no pip installs — `scripts/parse_export.py` is stdlib-only (`argparse`,
-  `json`, `urllib`, `zipfile`, `pathlib`).
-- A **Gmail MCP connector**, to locate the "your data is ready for download" email.
+- Everything under **Prerequisites** above.
 - Either **PowerShell** (`Start-Process`) / `open` (macOS) / `xdg-open` (Linux), or the
   **claude-in-chrome MCP connector**, to open the export's one-time download links in a
-  real logged-in browser session.
+  real logged-in browser session. (macOS/Linux paths are implemented but not yet verified
+  against a real export on those platforms — see open issues if you hit something.)
 
 ## Privacy
 
