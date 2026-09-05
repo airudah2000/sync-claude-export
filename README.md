@@ -48,14 +48,12 @@ supported API for that direction, and this project doesn't attempt to work aroun
 
 ```mermaid
 flowchart LR
-    subgraph claude.ai
-        A[Data Export] --> B[raw/]
+    A[claude.ai Data Export] --> B[raw/]
+    subgraph "Local Claude Code Machine"
+        B --> D[parsed/]
+        C["~/.claude/projects/*.jsonl"] --> D
+        D --> E[index.md + manifest.json]
     end
-    subgraph "This machine"
-        C["~/.claude/projects/*.jsonl"] --> D[parsed/]
-        B --> D
-    end
-    D --> E[index.md + manifest.json]
 ```
 
 ## Prerequisites & Requirements
