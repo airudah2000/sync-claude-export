@@ -56,21 +56,7 @@ one throwaway scheduled job before relying on either assumption.
 
 ---
 
-## 3. Cross-platform support
-
-**Problem:** as written, the skill assumes Windows: `Start-Process` for opening browser
-links, and `SKILL.md`'s example paths use backslash-style Windows paths throughout.
-
-**Proposed fix:**
-- Browser-open step: `Start-Process` (Windows) / `open` (macOS) / `xdg-open` (Linux),
-  or superseded entirely by item 1's Playwright approach, which is OS-agnostic by nature.
-- `parse_export.py` itself is already plain Python + pathlib, so it should be largely
-  portable as-is -- mainly `SKILL.md`'s instructions and example paths need to stop
-  assuming Windows.
-
----
-
-## 4. Smarter-than-substring related-project matching
+## 3. Smarter-than-substring related-project matching
 
 **Problem:** `find_related_projects()` (parse-conversations) does a plain case-insensitive
 substring match of each known project name against conversation text. Verified against
@@ -127,4 +113,21 @@ frontmatter and the index, so a wrong flag is visible and low-cost, not silently
   `parse-projects` -- confirmed and now co-located as `_project-memory.md` next to each
   project's `_project-knowledge.md`, instead of sitting in a disconnected top-level folder.
 - Added a heuristic (not hard-link) `related_projects` annotation to conversations, since
-  no real link exists for them -- see item 4 above for its known limitation.
+  no real link exists for them -- see item 3 above for its known limitation.
+- Cross-platform support: `SKILL.md` step 4 now prefers the `claude-in-chrome` MCP
+  connector (OS-agnostic, cleanly closable tabs) by default, falling back to per-OS
+  shellouts (`Start-Process` / `open` / `xdg-open`) only when that connector isn't
+  available. `parse_export.py` was already plain Python + pathlib and needed no changes.
+- Design-chat folder collision: two same-named Design canvas "projects" would silently
+  overwrite each other's output folder (no uuid suffix, unlike the real-project fix
+  above) -- fixed by suffixing with the design-chat's own project uuid.
+- Design-chat nested-content unwrap only handled a plain string `content.content`; a
+  list-of-blocks form silently yielded empty text -- fixed to recurse through
+  `content_to_text()` for that case too.
+- No per-file error isolation in `parse-projects`/`parse-design-chats`: one malformed
+  JSON file crashed the whole run -- fixed with a per-file try/except (skip + warn +
+  count in a new `skipped_errors` counter), matching the pattern `load_project_names()`
+  already used.
+- Added a small `unittest`-based test suite (`tests/test_parse_export.py`, no external
+  dependencies) covering the above fixes plus title-fallback and manifest-transition
+  behavior.
