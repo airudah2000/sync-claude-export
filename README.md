@@ -59,6 +59,6 @@ too; it isn't meant to be checked in anywhere.
 
 ## Known limitations & roadmap
 
-See [`FUTURE_IMPROVEMENTS.md`](FUTURE_IMPROVEMENTS.md) for what's deliberately deferred
-(cross-platform polish, a recurring re-export reminder, smarter project-matching) and what
-data-shape quirks have already been found and fixed.
+Tracked as [GitHub Issues](https://github.com/airudah2000/sync-claude-export/issues) —
+currently a recurring re-export reminder and, for environments with no MCP host at all, an
+isolated Playwright-based download fallback.
