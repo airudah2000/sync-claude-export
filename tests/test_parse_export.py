@@ -1,8 +1,8 @@
 """Unit tests for parse_export.py, using only synthetic fixture data
-constructed inline -- never real personal export data.
+constructed inline. Never real personal export data.
 
 Run with: python -m unittest discover -s tests -v
-(stdlib unittest only -- this project stays dependency-free; pytest isn't
+(stdlib unittest only. This project stays dependency-free; pytest isn't
 required and wasn't installed in the dev environment this suite was written
 against.)
 """
@@ -100,7 +100,7 @@ class TestFindRelatedProjects(unittest.TestCase):
     def test_short_name_single_incidental_mention_in_turns_is_ignored(self):
         # Real false positive this was written to fix: a short/acronym-like
         # name appearing once, only deep in the conversation, not the title
-        # or summary -- should NOT be flagged.
+        # or summary. Should NOT be flagged.
         related = pe.find_related_projects(
             "Immigration strategy", "", "My SC clearance came via RMAS work.", self.patterns)
         self.assertNotIn("RMAS", related)

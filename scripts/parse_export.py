@@ -22,7 +22,7 @@ Subcommands:
   index-code-sessions    Parse local Claude Code session transcripts -> archive.
 
 All field-name assumptions about each claude.ai export shape are isolated in
-their respective extract_*() functions -- if inspect-export shows different
+their respective extract_*() functions. If inspect-export shows different
 names, only that function needs editing.
 """
 
@@ -112,7 +112,7 @@ def project_folder(name, pid):
 def design_chat_project_folder(name, pid):
     """Design canvases use their own unrelated 'project' uuid namespace (verified:
     zero overlap with real Projects), but two Design projects can still share the
-    same display name -- suffix with that project's own uuid to avoid collisions,
+    same display name. Suffix with that project's own uuid to avoid collisions,
     same fix already applied to project_folder()."""
     return Path("design-chats") / f"{slugify(name)}-{str(pid)[:8]}"
 
@@ -130,10 +130,10 @@ def compile_project_patterns(project_names):
 def find_related_projects(title, summary, turns_text, project_patterns, exclude_name=None):
     """Heuristic only: word-boundary match of each known project name against
     conversation text, weighted by where the match falls. Not a hard link
-    (conversations.json carries no project id at all) -- flags a *possible*
+    (conversations.json carries no project id at all). Flags a *possible*
     mention for a human to judge, never used to move/group the file itself.
 
-    A match in the title or summary is a strong signal -- one hit is enough.
+    A match in the title or summary is a strong signal: one hit is enough.
     A match only inside the turn text is weaker: short, acronym-like names
     (<8 chars, e.g. "RMAS") need 3+ mentions there to count, since a single
     incidental mention (e.g. via an unrelated SC-clearance/military-service
@@ -216,7 +216,7 @@ def cmd_fetch(args):
                 content_type = resp.headers.get("Content-Type", "")
                 data = resp.read()
         except urllib.error.HTTPError as e:
-            print(f"FALLBACK_NEEDED: HTTP {e.code} fetching URL -- likely requires an authenticated browser session.", file=sys.stderr)
+            print(f"FALLBACK_NEEDED: HTTP {e.code} fetching URL, likely requires an authenticated browser session.", file=sys.stderr)
             return 2
         except urllib.error.URLError as e:
             print(f"FALLBACK_NEEDED: could not reach URL ({e.reason}).", file=sys.stderr)
@@ -282,7 +282,7 @@ def cmd_inspect_export(args):
 
 def title_from_turns(turns, fallback):
     """Falls back to the first substantive human message when a conversation
-    has no real title -- mirrors the same fix applied to code-session titles."""
+    has no real title. Mirrors the same fix applied to code-session titles."""
     for turn in turns:
         if turn["role"] not in ("human", "user"):
             continue
