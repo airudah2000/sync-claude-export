@@ -239,6 +239,140 @@ class TestProjectsParsing(unittest.TestCase):
             self.assertEqual(counts["skipped_errors"], 1)
             self.assertEqual(counts["new"], 1)
 
+    def test_changes_list_names_the_new_item(self):
+        # Locks in the "surface what's new" contract: changes[] must carry
+        # enough (title/project/path) to report to a user without them having
+        # to go dig through index.md themselves.
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            projects_dir, parsed_dir = td / "projects", td / "parsed"
+            projects_dir.mkdir()
+            proj = {
+                "uuid": "proj0002", "name": "New Project",
+                "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z",
+                "docs": [],
+            }
+            (projects_dir / "new.json").write_text(json.dumps(proj), encoding="utf-8")
+            manifest_path = td / "manifest.json"
+            args = SimpleNamespace(projects_dir=str(projects_dir), parsed_dir=str(parsed_dir), manifest=str(manifest_path))
+            rc, out, err = _run_quiet(pe.cmd_parse_projects, args)
+            counts = json.loads(out)
+            self.assertEqual(len(counts["changes"]), 1)
+            self.assertEqual(counts["changes"][0]["status"], "new")
+            self.assertEqual(counts["changes"][0]["title"], "New Project")
+
+            # second run, nothing changed: changes[] must be empty, not just counts["new"] == 0
+            rc, out, err = _run_quiet(pe.cmd_parse_projects, args)
+            counts = json.loads(out)
+            self.assertEqual(counts["changes"], [])
+
+
+class TestMemoriesParsing(unittest.TestCase):
+    def _parse(self, json_path, parsed_dir, manifest_path):
+        args = SimpleNamespace(json=str(json_path), parsed_dir=str(parsed_dir), manifest=str(manifest_path), projects_dir=None)
+        return _run_quiet(pe.cmd_parse_memories, args)
+
+    def test_rerun_with_unchanged_content_reports_unchanged(self):
+        # Regression test: parse-memories used to unconditionally overwrite
+        # every file on every run (no manifest_upsert / change-detection at
+        # all), which meant every re-run reported every item as freshly
+        # written even with byte-identical source data. Content-hash-based
+        # versioning fixes this; this test locks the fix in.
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            parsed_dir = td / "parsed"
+            data = {
+                "conversations_memory": "Some durable global fact.",
+                "project_memories": {},
+                "memory_files": [{"path": "/profile.md", "content": "Rob.", "updated_at": "2026-01-01T00:00:00Z"}],
+            }
+            json_path = td / "memories.json"
+            json_path.write_text(json.dumps(data), encoding="utf-8")
+            manifest_path = td / "manifest.json"
+
+            rc, out, err = self._parse(json_path, parsed_dir, manifest_path)
+            counts = json.loads(out)
+            self.assertEqual(counts["new"], 2)  # global + the one memory file, both first-seen
+            self.assertEqual(len(counts["changes"]), 2)
+
+            rc, out, err = self._parse(json_path, parsed_dir, manifest_path)
+            counts = json.loads(out)
+            self.assertEqual(counts["updated"], 0)
+            self.assertEqual(counts["unchanged"], 2)
+            self.assertEqual(counts["changes"], [])
+
+    def test_changed_global_memory_content_is_detected(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            parsed_dir = td / "parsed"
+            manifest_path = td / "manifest.json"
+            json_path = td / "memories.json"
+
+            json_path.write_text(json.dumps({"conversations_memory": "First version."}), encoding="utf-8")
+            self._parse(json_path, parsed_dir, manifest_path)
+
+            json_path.write_text(json.dumps({"conversations_memory": "Second, different version."}), encoding="utf-8")
+            rc, out, err = self._parse(json_path, parsed_dir, manifest_path)
+            counts = json.loads(out)
+            self.assertEqual(counts["updated"], 1)
+            self.assertIn("Second, different version.",
+                           (parsed_dir / "claude-ai-memory" / "global-memory.md").read_text(encoding="utf-8"))
+
+
+class TestCleanupDownloads(unittest.TestCase):
+    def test_export_zip_pattern_matches_known_categories_and_dup_suffix(self):
+        for name in ["light_metadata-000.zip", "projects-000.zip", "projects-000 (1).zip",
+                     "memories-000.zip", "conversations-000 (2).zip", "design_chats-000.zip"]:
+            self.assertTrue(pe.EXPORT_ZIP_RE.match(name), f"expected match: {name}")
+
+    def test_export_zip_pattern_rejects_unrelated_zips(self):
+        for name in ["user-research-cookiy-skill.zip", "claude-code-jetbrains-plugin-0.1.14-beta.zip",
+                     "projects.zip", "my-projects-000.zip"]:
+            self.assertFalse(pe.EXPORT_ZIP_RE.match(name), f"expected no match: {name}")
+
+    def test_manifest_pattern_matches_real_shape(self):
+        name = "manifest-801f8f6b-721e-4762-a476-6e78eafc4ebd-1788818193-58c908fe-2026-09-07-21-56-41.json"
+        self.assertTrue(pe.EXPORT_MANIFEST_RE.match(name))
+
+    def test_manifest_pattern_rejects_unrelated_json(self):
+        self.assertFalse(pe.EXPORT_MANIFEST_RE.match("manifest.json"))
+        self.assertFalse(pe.EXPORT_MANIFEST_RE.match("some-other-file.json"))
+
+    def test_deletes_only_matching_files(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            keep = td / "user-research-cookiy-skill.zip"
+            keep.write_text("keep me", encoding="utf-8")
+            zap1 = td / "projects-000.zip"
+            zap1.write_text("delete me", encoding="utf-8")
+            zap2 = td / "manifest-801f8f6b-721e-4762-a476-6e78eafc4ebd-1788818193-58c908fe-2026-09-07-21-56-41.json"
+            zap2.write_text("{}", encoding="utf-8")
+
+            args = SimpleNamespace(downloads_dir=str(td), dry_run=False)
+            rc, out, err = _run_quiet(pe.cmd_cleanup_downloads, args)
+            self.assertEqual(rc, 0)
+            result = json.loads(out)
+            self.assertEqual(result["count"], 2)
+            self.assertTrue(keep.exists(), "unrelated file must never be deleted")
+            self.assertFalse(zap1.exists())
+            self.assertFalse(zap2.exists())
+
+    def test_dry_run_deletes_nothing(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            zap = td / "memories-000.zip"
+            zap.write_text("data", encoding="utf-8")
+            args = SimpleNamespace(downloads_dir=str(td), dry_run=True)
+            rc, out, err = _run_quiet(pe.cmd_cleanup_downloads, args)
+            result = json.loads(out)
+            self.assertEqual(result["count"], 1)
+            self.assertTrue(zap.exists(), "dry-run must not delete anything")
+
 
 if __name__ == "__main__":
     unittest.main()

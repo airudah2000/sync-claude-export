@@ -20,6 +20,7 @@ Subcommands:
   parse-memories         Parse the single memories JSON file -> archive.
   inspect-code-session   Print the real shape of one local Claude Code .jsonl session file.
   index-code-sessions    Parse local Claude Code session transcripts -> archive.
+  cleanup-downloads      Delete already-fetched export zips/manifests left in Downloads.
 
 All field-name assumptions about each claude.ai export shape are isolated in
 their respective extract_*() functions. If inspect-export shows different
@@ -27,6 +28,7 @@ names, only that function needs editing.
 """
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -335,6 +337,7 @@ def cmd_parse_conversations(args):
         conversations = conversations.get("conversations", [conversations])
 
     counts = {"new": 0, "updated": 0, "unchanged": 0}
+    changes = []
     for convo in conversations:
         fields = extract_conversation_fields(convo)
         key = f"claude-ai-conversation:{fields['id']}"
@@ -350,12 +353,14 @@ def cmd_parse_conversations(args):
         counts[status] = counts.get(status, 0) + 1
         if status == "unchanged":
             continue
+        changes.append({"status": status, "title": fields["title"], "project": fields["project"], "path": str(rel_path)})
         write_conversation_md(parsed_dir / rel_path, fields["title"], fields["project"],
                                fields["created"], fields["updated"], "claude.ai", fields["turns"], related)
 
     save_manifest(manifest_path, manifest)
     write_index(parsed_dir, manifest)
     counts["total"] = len(conversations)
+    counts["changes"] = changes
     print(json.dumps(counts, indent=2))
     return 0
 
@@ -373,6 +378,7 @@ def cmd_parse_projects(args):
 
     files = sorted(projects_dir.glob("*.json"))
     counts = {"new": 0, "updated": 0, "unchanged": 0, "skipped_errors": 0}
+    changes = []
     for f in files:
         try:
             proj = json.loads(f.read_text(encoding="utf-8"))
@@ -392,6 +398,7 @@ def cmd_parse_projects(args):
         counts[status] = counts.get(status, 0) + 1
         if status == "unchanged":
             continue
+        changes.append({"status": status, "title": name, "project": name, "path": str(rel_path)})
 
         lines = [
             "---", f'title: "{name}"', f'project: "{name}"', f'created: "{created or ""}"',
@@ -410,6 +417,7 @@ def cmd_parse_projects(args):
     save_manifest(manifest_path, manifest)
     write_index(parsed_dir, manifest)
     counts["total"] = len(files)
+    counts["changes"] = changes
     print(json.dumps(counts, indent=2))
     return 0
 
@@ -427,6 +435,7 @@ def cmd_parse_design_chats(args):
 
     files = sorted(chats_dir.glob("*.json"))
     counts = {"new": 0, "updated": 0, "unchanged": 0, "skipped_errors": 0}
+    changes = []
     for f in files:
         try:
             chat = json.loads(f.read_text(encoding="utf-8"))
@@ -477,11 +486,13 @@ def cmd_parse_design_chats(args):
         counts[status] = counts.get(status, 0) + 1
         if status == "unchanged":
             continue
+        changes.append({"status": status, "title": title, "project": project_name, "path": str(rel_path)})
         write_conversation_md(parsed_dir / rel_path, title, project_name, created, updated, "claude.ai-design", turns)
 
     save_manifest(manifest_path, manifest)
     write_index(parsed_dir, manifest)
     counts["total"] = len(files)
+    counts["changes"] = changes
     print(json.dumps(counts, indent=2))
     return 0
 
@@ -497,19 +508,27 @@ def cmd_parse_memories(args):
     manifest_path = Path(args.manifest)
     manifest = load_manifest(manifest_path)
 
-    written = 0
+    counts = {"new": 0, "updated": 0, "unchanged": 0}
+    changes = []
+
+    # global memory and project memories carry no updated_at in the source data,
+    # so a content hash stands in as the manifest_upsert change-detection key --
+    # otherwise every run would look unchanged forever (or rewrite unconditionally,
+    # which was the previous bug: this used to overwrite every file every run).
+    def content_version(text):
+        return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:16]
 
     global_mem = data.get("conversations_memory")
     if global_mem:
         rel_path = Path("claude-ai-memory") / "global-memory.md"
-        abs_path = parsed_dir / rel_path
-        abs_path.parent.mkdir(parents=True, exist_ok=True)
-        abs_path.write_text(f"# Claude.ai Cross-Conversation Memory\n\n{global_mem}\n", encoding="utf-8")
-        manifest["claude-ai-memory:global"] = {
-            "title": "Global memory", "project": None, "source": "claude.ai-memory",
-            "created": None, "updated": None, "path": str(rel_path),
-        }
-        written += 1
+        status = manifest_upsert(manifest, "claude-ai-memory:global", "Global memory", None,
+                                  "claude.ai-memory", None, content_version(global_mem), rel_path)
+        counts[status] = counts.get(status, 0) + 1
+        if status != "unchanged":
+            changes.append({"status": status, "title": "Global memory", "project": None, "path": str(rel_path)})
+            abs_path = parsed_dir / rel_path
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            abs_path.write_text(f"# Claude.ai Cross-Conversation Memory\n\n{global_mem}\n", encoding="utf-8")
 
     project_names = dict(load_project_names(args.projects_dir)) if args.projects_dir else {}
 
@@ -527,31 +546,36 @@ def cmd_parse_memories(args):
             rel_path = Path("claude-ai-memory") / "project-memories" / f"{proj_id}.md"
             title = f"Project memory ({proj_id})"
             project_field = proj_id
+        key = f"claude-ai-memory:project:{proj_id}"
+        status = manifest_upsert(manifest, key, title, project_field, "claude.ai-memory",
+                                  None, content_version(text), rel_path)
+        counts[status] = counts.get(status, 0) + 1
+        if status == "unchanged":
+            continue
+        changes.append({"status": status, "title": title, "project": project_field, "path": str(rel_path)})
         abs_path = parsed_dir / rel_path
         abs_path.parent.mkdir(parents=True, exist_ok=True)
         abs_path.write_text(f"# {title}\n\n{text}\n", encoding="utf-8")
-        manifest[f"claude-ai-memory:project:{proj_id}"] = {
-            "title": title, "project": project_field, "source": "claude.ai-memory",
-            "created": None, "updated": None, "path": str(rel_path), "related_projects": [],
-        }
-        written += 1
 
     for mf in (data.get("memory_files") or []):
         path_field = mf.get("path", "untitled")
         stem = path_field[:-3] if path_field.endswith(".md") else path_field
         rel_path = Path("claude-ai-memory") / "memory-files" / f"{slugify(stem)}.md"
+        key = f"claude-ai-memory:file:{path_field}"
+        status = manifest_upsert(manifest, key, path_field, None, "claude.ai-memory",
+                                  None, mf.get("updated_at"), rel_path)
+        counts[status] = counts.get(status, 0) + 1
+        if status == "unchanged":
+            continue
+        changes.append({"status": status, "title": path_field, "project": None, "path": str(rel_path)})
         abs_path = parsed_dir / rel_path
         abs_path.parent.mkdir(parents=True, exist_ok=True)
         abs_path.write_text(f"# Memory File: {path_field}\n\n{mf.get('content', '')}\n", encoding="utf-8")
-        manifest[f"claude-ai-memory:file:{path_field}"] = {
-            "title": path_field, "project": None, "source": "claude.ai-memory",
-            "created": None, "updated": mf.get("updated_at"), "path": str(rel_path),
-        }
-        written += 1
 
     save_manifest(manifest_path, manifest)
     write_index(parsed_dir, manifest)
-    print(json.dumps({"items_written": written}, indent=2))
+    counts["changes"] = changes
+    print(json.dumps(counts, indent=2))
     return 0
 
 
@@ -596,6 +620,7 @@ def cmd_index_code_sessions(args):
     session_files = sorted(projects_dir.glob("*/*.jsonl")) if projects_dir.exists() else []
 
     counts = {"new": 0, "updated": 0, "unchanged": 0, "skipped_empty": 0}
+    changes = []
     for session_path in session_files:
         project_key = session_path.parent.name
         session_id = session_path.stem
@@ -632,12 +657,54 @@ def cmd_index_code_sessions(args):
         counts[status] = counts.get(status, 0) + 1
         if status == "unchanged":
             continue
+        changes.append({"status": status, "title": title, "project": project_key, "path": str(rel_path)})
         write_conversation_md(parsed_dir / rel_path, title, project_key, first_ts, last_ts, "Claude Code", turns)
 
     save_manifest(manifest_path, manifest)
     write_index(parsed_dir, manifest)
     counts["total_sessions_seen"] = len(session_files)
+    counts["changes"] = changes
     print(json.dumps(counts, indent=2))
+    return 0
+
+
+# --------------------------------------------------------------------------
+# cleanup-downloads  (deletes only files matching the exact naming patterns
+# this tool itself produces/consumes -- never touches unrelated Downloads
+# files, even other .zip files)
+# --------------------------------------------------------------------------
+
+EXPORT_ZIP_RE = re.compile(
+    r"^(light_metadata|projects|memories|conversations|design_chats)-\d{3}(?: \(\d+\))?\.zip$"
+)
+EXPORT_MANIFEST_RE = re.compile(
+    r"^manifest-[0-9a-fA-F-]+-\d+-[0-9a-fA-F]+-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.json$"
+)
+
+
+def cmd_cleanup_downloads(args):
+    downloads_dir = Path(args.downloads_dir)
+    if not downloads_dir.exists():
+        print(f"ERROR: downloads dir not found: {downloads_dir}", file=sys.stderr)
+        return 1
+
+    matched = [
+        f for f in downloads_dir.iterdir()
+        if f.is_file() and (EXPORT_ZIP_RE.match(f.name) or EXPORT_MANIFEST_RE.match(f.name))
+    ]
+
+    if args.dry_run:
+        print(json.dumps({"would_delete": [str(f) for f in matched], "count": len(matched)}, indent=2))
+        return 0
+
+    deleted, failed = [], []
+    for f in matched:
+        try:
+            f.unlink()
+            deleted.append(str(f))
+        except OSError as e:
+            failed.append({"path": str(f), "error": str(e)})
+    print(json.dumps({"deleted": deleted, "failed": failed, "count": len(deleted)}, indent=2))
     return 0
 
 
@@ -692,6 +759,11 @@ def main():
     p.add_argument("--parsed-dir", required=True)
     p.add_argument("--manifest", required=True)
     p.set_defaults(func=cmd_index_code_sessions)
+
+    p = sub.add_parser("cleanup-downloads")
+    p.add_argument("--downloads-dir", default=str(Path.home() / "Downloads"))
+    p.add_argument("--dry-run", action="store_true", help="List what would be deleted without deleting")
+    p.set_defaults(func=cmd_cleanup_downloads)
 
     args = parser.parse_args()
     sys.exit(args.func(args))

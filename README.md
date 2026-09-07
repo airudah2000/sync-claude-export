@@ -44,7 +44,11 @@ supported API for that direction, and this project doesn't attempt to work aroun
   this machine and extracts human-readable user/assistant text only (never raw tool output
   or file contents) into the same archive.
 - Both feed the same `manifest.json` + `index.md`, so re-running after a later export
-  updates entries in place instead of duplicating them.
+  updates entries in place instead of duplicating them. Your first-ever export tends to
+  return all 5 category files; later exports typically return fewer (categories with
+  nothing new are simply omitted), so they arrive faster and parse quicker.
+- Every run reports what's actually new by title, not just counts, and offers to delete
+  the now-redundant zips/manifest it downloaded to your Downloads folder afterward.
 
 ```mermaid
 flowchart LR
@@ -111,8 +115,9 @@ fall back to the manual path: download the file yourself from the email link and
 Claude the path.
 
 **The download link says it's expired, or nothing downloads.**
-Links expire 24 hours after the "ready for download" email, and each of the 5 per-category
-links is single-use. Re-trigger a fresh export and start over.
+Links expire 24 hours after the "ready for download" email, and every per-category link
+(the manifest lists between 1 and 5 depending on what's changed since your last export —
+see below) is single-use. Re-trigger a fresh export and start over.
 
 **`config.json` fails to parse.**
 Almost always a Windows path typed with single backslashes into JSON. Use forward slashes

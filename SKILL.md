@@ -30,11 +30,29 @@ conversation history. If it ever ends up inside a git repo, make sure it's gitig
 
 ## Part A: claude.ai export -> archive
 
-1. **Check the export was triggered.** Ask the user to confirm they've recently clicked
-   Export Data on claude.ai web (Settings -> Privacy -> Export Data), which isn't possible
-   from the mobile app. Two emails arrive: "Your data export is in progress," then once
+1. **Check first, ask second.** Before asking the user anything, run the Gmail search from
+   step 2 yourself. Don't require the user to confirm they clicked Export Data before you've
+   even looked. Two emails arrive per export: "Your data export is in progress," then once
    ready, "Your data is ready for download." The second one's "Download data" button link
-   expires 24 hours after delivery.
+   expires 24 hours after delivery, and export processing itself can take a few hours (rarely
+   up to 12).
+
+   - **Ready email found:** proceed straight to step 3, no need to ask anything.
+   - **Only the "in progress" email found:** the export is running. Don't ask the user to
+     ping you back — poll for it yourself (e.g. `ScheduleWakeup` at ~20-30 min intervals, or
+     whatever this session's equivalent of "check back later" is) and re-run the same Gmail
+     search each time until the ready email appears. Tell the user once, up front, that
+     you'll check back automatically rather than asking them to remind you.
+   - **Neither email found:** only now ask the user to trigger an export (Settings -> Privacy
+     -> Export Data on claude.ai web; not available on mobile).
+
+   **Export size/speed varies a lot between runs, this is normal, not a bug:** the first-ever
+   export for an account tends to return all ~5 category files (`light_metadata`, `projects`,
+   `memories`, `design_chats`, `conversations`) and can take longer to process. Later exports
+   (re-triggered after the archive already has a baseline) often come back with fewer files
+   in the manifest — categories with nothing new/changed are simply omitted — arrive faster,
+   and are cheaper to parse. Don't treat a manifest with fewer than 5 files as an error; check
+   `total_files` and `data_files` in the manifest itself rather than assuming a fixed shape.
 
 2. **Find the ready email.** Gmail MCP `search_threads`:
    `from:anthropic.com OR from:claude.ai (export OR "data export" OR "your data") newer_than:2d`
@@ -89,15 +107,34 @@ conversation history. If it ever ends up inside a git repo, make sure it's gitig
      ]
    }
    ```
-   Read that manifest, then **open all 5 `export_url`s the same way** (whichever method
-   you used above, one call per URL with a short pause between them). Each one
-   auto-downloads its zip to Downloads. **Each `export_url` is single-use**: never open
-   the same one twice, and never also try a script-side fetch on one you've already
-   opened in-browser.
+   Read that manifest, then **open each `export_url` in its own fresh tab (`tabs_create_mcp`
+   -> `navigate` -> verify -> `tabs_close_mcp`, repeat), never two links in the same tab.**
+   Each `export_url` is single-use and marked consumed server-side the moment it's
+   requested, whether or not the file actually reaches disk — so never open the same one
+   twice, and never treat a fixed short wait, or the generic "Downloading..." page
+   content, as proof the file arrived. After opening a link, poll the Downloads folder for
+   the exact expected filename (freshly modified, not a stale file of the same name from
+   a previous run) before closing that tab and moving to the next link.
 
-   If neither method is available, or a link still doesn't produce a real zip (check:
-   a "FALLBACK_NEEDED" style HTML/login-redirect result), fall back to asking the user
-   to download it manually and hand you the file path.
+   **Known failure mode, root cause, and the fix (all confirmed in real runs on
+   2026-09-07):** reusing the *same* tab for a second (or later) automatic download
+   silently drops it — Chrome's own "this site is trying to download multiple files"
+   guard blocks every automatic download in a tab after the first, via a browser-chrome
+   infobar near the address bar that the `claude-in-chrome` screenshot/computer tools
+   cannot see or click (they only capture the page viewport, not browser chrome). The
+   server still marks that `export_url` consumed even though nothing reached disk, so
+   there's no recovering it — re-opening it immediately confirms "Expired link." This is
+   **not** a timing/pacing issue: spacing out same-tab navigations doesn't help.
+   **The fix that works, verified**: give every download its own fresh tab. A brand-new
+   tab's automatic-download counter starts at zero, so its first (and only) download in
+   that tab always succeeds — confirmed getting 3 different category files this way back
+   to back with zero drops. No Chrome setting changes needed and none should be
+   requested; this is a pure sequencing fix within the existing browser-automation flow.
+
+   If neither browser method is available, or a link still doesn't produce a real zip
+   (check: a "FALLBACK_NEEDED" style HTML/login-redirect result, or an "Expired link"
+   page — the latter means the link was already burned, see above), fall back to asking
+   the user to download it manually and hand you the file path.
 
 5. **Move + unzip each downloaded zip:**
    ```
@@ -160,8 +197,26 @@ text (never raw tool output or file contents), writes/updates
 
 ## After either part
 
-Report a short summary (new/updated/unchanged counts per category, total items indexed)
-and point the user at `<parsed_dir>\index.md`.
+Every `parse-*` and `index-code-sessions` command's JSON output includes a `changes` array
+alongside the counts — one entry per new/updated item (`{status, title, project, path}`),
+skipping unchanged ones. **Use it**: report the counts, but also actually name what's new
+(conversation/project/memory titles), not just a number — the user should be able to see
+what showed up without having to go dig through `index.md` themselves. Group by category if
+there's more than a couple of items; skip categories with an empty `changes` list rather
+than reporting "0 new" noise for each one. Then point the user at `<parsed_dir>\index.md`
+for the full archive.
+
+After Part A finishes parsing, offer to clean up the now-redundant downloaded zips/manifest
+still sitting in Downloads (everything under step 4/5 has already been extracted into
+`raw_dir` and parsed into `parsed_dir` by this point, so the Downloads copies are pure
+clutter):
+```
+python scripts/parse_export.py cleanup-downloads --downloads-dir "<user's Downloads folder>"
+```
+Add `--dry-run` first if you want to show the user what would be deleted before actually
+deleting. This only ever matches this tool's own exact filename patterns (the 5 category
+zip names like `projects-000.zip` / `projects-000 (1).zip`, and `manifest-<id>-...json`) —
+it will never touch an unrelated file in Downloads, even another `.zip`.
 
 ## Known limitation: browser tabs opened during Part A step 4 (fallback path only)
 
