@@ -14,16 +14,26 @@ direction has no supported API and isn't possible today. This only builds a loca
 
 All logic lives in `scripts/parse_export.py`. Run it with whichever of `python` / `python3`
 actually resolves to a Python 3 interpreter on this machine: check with `python --version`
-/ `python3 --version` if unsure, don't assume. This file tells Claude what to do and in
-what order.
+/ `python3 --version` if unsure, don't assume. **macOS ships no `python` command, only
+`python3`** (and most Linux distros are the same), so the commands below, which are written
+as `python`, must be run as `python3` there. Installing Python won't add a `python` alias.
+Paths in every example use forward slashes, which work on all platforms including Windows.
+This file tells Claude what to do and in what order.
 
 ## First run: confirm storage location
 
 Confirm with the user where the archive should live (a folder *outside* any git repo,
-e.g. `~/ClaudeAI-Sync/` or `Documents/ClaudeAI-Sync/`, with `raw/` and `parsed/`
-subfolders), then record it in `config.json` next to this file. Copy `config.example.json`
-to `config.json` and fill in the real paths (forward slashes work fine even on Windows and
-sidestep JSON backslash-escaping mistakes, e.g. `"C:/Users/you/ClaudeAI-Sync/raw"`).
+e.g. `~/ClaudeAI-Sync/`, with `raw/` and `parsed/` subfolders), then record it in
+`config.json` next to this file. Copy `config.example.json` to `config.json` and fill in the
+real paths (forward slashes work fine even on Windows and sidestep JSON backslash-escaping
+mistakes, e.g. `"C:/Users/you/ClaudeAI-Sync/raw"`; on macOS,
+`"/Users/you/ClaudeAI-Sync/raw"`).
+
+**macOS: don't suggest `~/Documents` or `~/Desktop`.** If iCloud "Desktop & Documents" is on
+(`defaults read com.apple.finder FXICloudDriveDocuments` prints `1`), a folder there is
+uploaded to iCloud, and this archive is the user's full conversation history. Check that
+setting before proposing a location, and prefer a folder directly under the home directory.
+The same caution applies to any Dropbox/OneDrive/Google Drive folder.
 
 On later runs, read `config.json` instead of asking again. The archive holds personal
 conversation history. If it ever ends up inside a git repo, make sure it's gitignored.
@@ -38,13 +48,30 @@ conversation history. If it ever ends up inside a git repo, make sure it's gitig
    up to 12).
 
    - **Ready email found:** proceed straight to step 3, no need to ask anything.
-   - **Only the "in progress" email found:** the export is running. Don't ask the user to
+   - **Only the "in progress" email found:** the export is running. Small exports can finish
+     within seconds (in a real macOS run the "ready" email arrived 14 seconds after the "in
+     progress" one), so re-run the search once after a minute or so before settling into a
+     long poll. Don't ask the user to
      ping you back — poll for it yourself (e.g. `ScheduleWakeup` at ~20-30 min intervals, or
      whatever this session's equivalent of "check back later" is) and re-run the same Gmail
      search each time until the ready email appears. Tell the user once, up front, that
      you'll check back automatically rather than asking them to remind you.
-   - **Neither email found:** only now ask the user to trigger an export (Settings -> Privacy
-     -> Export Data on claude.ai web; not available on mobile).
+   - **Neither email found:** only now trigger an export (Settings -> Privacy -> Export Data
+     on claude.ai web; not available on mobile). Confirm with the user first, since it starts
+     an export of their whole account and emails them. **If the `claude-in-chrome` connector
+     is available you can do this yourself** (verified on macOS; the browser must already be
+     logged in to claude.ai):
+     1. Open `https://claude.ai/settings/data-privacy-controls` in a tab. It opens the
+        Settings modal (the URL becomes `claude.ai/new#settings/data-privacy-controls`).
+        If the panel is still a loading skeleton, wait a couple of seconds.
+     2. `find` the "Export data" button in the "Your data" section and click it.
+     3. The export panel has a **"Conversations from" range selector (All / 30 days / 90
+        days / Custom), defaulting to All.** Use All for a first sync. The panel lists only
+        "Conversations, Users, Projects", but the resulting manifest still contained all 5
+        category files (memories and design chats included).
+     4. Click "Export". An "Export started" toast confirms it. Close the tab, then go back
+        to the Gmail search (the "in progress" email arrives within seconds).
+     Otherwise, ask the user to do these steps themselves.
 
    **Export size/speed varies a lot between runs, this is normal, not a bug:** the first-ever
    export for an account tends to return all ~5 category files (`light_metadata`, `projects`,
@@ -67,7 +94,10 @@ conversation history. If it ever ends up inside a git repo, make sure it's gitig
 
 3. **Extract the "Download data" link.** `get_thread` on the chosen thread, then find the
    `https://claude.ai/export/.../download/...` URL in the body (it's the "Download data"
-   button href). Confirm with the user if ambiguous.
+   button href). Confirm with the user if ambiguous. Pass `messageFormat: PLAIN_TEXT` if
+   the connector offers it: this email's default `FULL_CONTENT` result is one very large
+   HTML-only body, so match the `https://claude.ai/export/<uuid>/download/<hash>` href
+   with a regex rather than reading the whole thing.
 
 4. **Open it in the user's browser. This is the default first attempt, not a fallback.**
    This must use the user's own logged-in session, so it succeeds where a plain
@@ -87,8 +117,8 @@ conversation history. If it ever ends up inside a git repo, make sure it's gitig
      default "open URL in default browser" command:
      - Windows: `powershell -Command "Start-Process '<the link>'"` (or the PowerShell
        tool directly)
-     - macOS: `open '<the link>'`
-     - Linux: `xdg-open '<the link>'`
+     - macOS: `open '<the link>'` (not yet verified on real hardware)
+     - Linux: `xdg-open '<the link>'` (not yet verified on real hardware)
      This still uses the user's logged-in session, but see the "Known limitation"
      section below: there's no clean way to close only the tab this opens.
 
@@ -107,8 +137,23 @@ conversation history. If it ever ends up inside a git repo, make sure it's gitig
      ]
    }
    ```
-   Read that manifest, then **open each `export_url` in its own fresh tab (`tabs_create_mcp`
-   -> `navigate` -> verify -> `tabs_close_mcp`, repeat), never two links in the same tab.**
+   Read that manifest, then **open each `export_url` in its own fresh tab, never two links
+   in the same tab.** The sequence that is reliable in practice (verified on macOS, 5 of 5
+   downloads, ~4-6 seconds each), run as separate steps, not batched into one parallel
+   call (a batched close can run before the navigate):
+   1. `tabs_context_mcp` with `createIfEmpty: true` (returns a fresh tab; the group was
+      auto-removed when its last tab closed)
+   2. `navigate` that tab to the `export_url`
+   3. poll the Downloads folder for the exact expected filename, modified in the last
+      couple of minutes and with no `<name>.crdownload` next to it, e.g. on macOS/Linux:
+      `find ~/Downloads -maxdepth 1 -name "projects-000.zip" -mmin -2`
+   4. `tabs_close_mcp` that tab, then repeat from step 1 for the next link
+
+   **Don't** do `tabs_create_mcp` and then close the group's *original* tab, and then
+   navigate in the new tab: on macOS that navigate failed with "Tab ... is not in Claude's
+   tab group" (before the page loaded, so the link was not consumed) and left a blank
+   "New tab" in the user's Chrome that the connector can't close. If it happens, recover
+   with `tabs_context_mcp` `createIfEmpty: true` and retry the same link.
    Each `export_url` is single-use and marked consumed server-side the moment it's
    requested, whether or not the file actually reaches disk — so never open the same one
    twice, and never treat a fixed short wait, or the generic "Downloading..." page
@@ -130,6 +175,8 @@ conversation history. If it ever ends up inside a git repo, make sure it's gitig
    that tab always succeeds — confirmed getting 3 different category files this way back
    to back with zero drops. No Chrome setting changes needed and none should be
    requested; this is a pure sequencing fix within the existing browser-automation flow.
+   Re-verified on macOS (Intel, macOS 15.6.1, Chrome via `claude-in-chrome`) on 2026-09-22
+   with zero dropped downloads.
 
    If neither browser method is available, or a link still doesn't produce a real zip
    (check: a "FALLBACK_NEEDED" style HTML/login-redirect result, or an "Expired link"
@@ -154,11 +201,16 @@ conversation history. If it ever ends up inside a git repo, make sure it's gitig
 7. **Parse each category. `parse-projects` MUST run first**, since the other two now
    read its output directory to cross-reference projects (`--projects-dir`):
    ```
-   python scripts/parse_export.py parse-projects       --projects-dir "<extracted>\projects" --parsed-dir "<parsed_dir>" --manifest "<parsed_dir>\manifest.json"
-   python scripts/parse_export.py parse-memories        --json "<extracted>\memories\<account-uuid>.json" --parsed-dir "<parsed_dir>" --manifest "<parsed_dir>\manifest.json" --projects-dir "<extracted>\projects"
-   python scripts/parse_export.py parse-conversations --json "<conversations.json>" --parsed-dir "<parsed_dir>" --manifest "<parsed_dir>\manifest.json" --projects-dir "<extracted>\projects"
-   python scripts/parse_export.py parse-design-chats    --chats-dir "<extracted>\design_chats" --parsed-dir "<parsed_dir>" --manifest "<parsed_dir>\manifest.json"
+   python scripts/parse_export.py parse-projects       --projects-dir "<extracted>/projects" --parsed-dir "<parsed_dir>" --manifest "<parsed_dir>/manifest.json"
+   python scripts/parse_export.py parse-memories        --json "<extracted>/memories/<account-uuid>.json" --parsed-dir "<parsed_dir>" --manifest "<parsed_dir>/manifest.json" --projects-dir "<extracted>/projects"
+   python scripts/parse_export.py parse-conversations --json "<conversations.json>" --parsed-dir "<parsed_dir>" --manifest "<parsed_dir>/manifest.json" --projects-dir "<extracted>/projects"
+   python scripts/parse_export.py parse-design-chats    --chats-dir "<extracted>/design_chats" --parsed-dir "<parsed_dir>" --manifest "<parsed_dir>/manifest.json"
    ```
+   `fetch` extracts each zip into `<raw_dir>/<category>-000/` and prints the paths, so
+   `<extracted>` above is a different folder per category, e.g.
+   `<raw_dir>/projects-000/projects`, `<raw_dir>/memories-000/memories/<uuid>.json`,
+   `<raw_dir>/conversations-000/conversations.json`,
+   `<raw_dir>/design_chats-000/design_chats`.
    Each prints new/updated/unchanged counts and is safe to re-run after a later export:
    updates in place rather than duplicating (verified: re-running with no new data reports
    all-unchanged with no file-count growth).
@@ -188,12 +240,12 @@ conversation history. If it ever ends up inside a git repo, make sure it's gitig
 No download needed. Reads what's already on this machine.
 
 ```
-python scripts/parse_export.py index-code-sessions --parsed-dir "<parsed_dir>" --manifest "<parsed_dir>\manifest.json"
+python scripts/parse_export.py index-code-sessions --parsed-dir "<parsed_dir>" --manifest "<parsed_dir>/manifest.json"
 ```
 
 Walks every `~/.claude/projects/*/*.jsonl`, extracts only human-readable user/assistant
 text (never raw tool output or file contents), writes/updates
-`parsed_dir\code-sessions\<project>\*.md`, sharing the same manifest/index as Part A.
+`parsed_dir/code-sessions/<project>/*.md`, sharing the same manifest/index as Part A.
 
 ## After either part
 
@@ -203,7 +255,7 @@ skipping unchanged ones. **Use it**: report the counts, but also actually name w
 (conversation/project/memory titles), not just a number — the user should be able to see
 what showed up without having to go dig through `index.md` themselves. Group by category if
 there's more than a couple of items; skip categories with an empty `changes` list rather
-than reporting "0 new" noise for each one. Then point the user at `<parsed_dir>\index.md`
+than reporting "0 new" noise for each one. Then point the user at `<parsed_dir>/index.md`
 for the full archive.
 
 After Part A finishes parsing, offer to clean up the now-redundant downloaded zips/manifest

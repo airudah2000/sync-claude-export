@@ -65,25 +65,38 @@ flowchart LR
 | Requirement | Why |
 |---|---|
 | Claude Code logged in via a claude.ai subscription (Pro/Max/Team/Enterprise), **not** a bare `ANTHROPIC_API_KEY` | The Gmail and `claude-in-chrome` connectors this skill uses only load under claude.ai's own OAuth (`/login`). They don't appear at all under pure API-key auth. If you have an API key set, unset it, run `/login`, then check `/mcp` lists both connectors. |
-| Python 3 on your `PATH` as `python` or `python3` | Runs `scripts/parse_export.py`, which is stdlib-only (`argparse`, `json`, `urllib`, `zipfile`, `pathlib`). No pip installs needed. |
-| **Gmail MCP connector** | Locates the "your data is ready for download" email. |
-| **claude-in-chrome MCP connector**, or PowerShell (`Start-Process`) / `open` (macOS) / `xdg-open` (Linux) | Opens the export's one-time download links in a real logged-in browser session. macOS/Linux paths are implemented but not yet verified against a real export on those platforms. See [open issues](https://github.com/airudah2000/sync-claude-export/issues) if you hit something. |
+| Python 3 on your `PATH` as `python` or `python3` | Runs `scripts/parse_export.py`, which is stdlib-only (`argparse`, `json`, `urllib`, `zipfile`, `pathlib`). No pip installs needed. **macOS ships no `python` command, only `python3`**, and installing Python won't add one. The commands in `SKILL.md` are written as `python`; substitute `python3` on macOS/Linux. |
+| **Gmail MCP connector** | Locates the "your data is ready for download" email. Make sure it's connected to the same account you export from. |
+| **claude-in-chrome MCP connector**, or PowerShell (`Start-Process`) / `open` (macOS) / `xdg-open` (Linux) | Opens the export's one-time download links in a real logged-in browser session, and can also trigger the export itself. The Chrome extension being installed isn't enough: run `/chrome` in Claude Code, then **fully quit and relaunch Claude Code** before the `mcp__claude-in-chrome__*` tools appear. Verified end to end on macOS (see [Platform support](#platform-support)). The `open` / `xdg-open` fallbacks and Linux are still unverified. See [open issues](https://github.com/airudah2000/sync-claude-export/issues) if you hit something. |
 
 ## Quick start
 
 1. Install the skill so it's available in every project, not just one repo. Copy this
-   whole folder to `~/.claude/skills/sync-claude-export/` (user-level skills apply across
+   folder to `~/.claude/skills/sync-claude-export/` (user-level skills apply across
    all your Claude Code sessions; a user-level skill also takes precedence over a
-   project-level one of the same name). Copying it into a single project's
-   `.claude/skills/` instead works too, but then it's only usable from that one project.
+   project-level one of the same name). Copy the files, not the `.git` folder:
+   ```
+   # macOS / Linux
+   mkdir -p ~/.claude/skills
+   rsync -a --exclude .git --exclude __pycache__ ./ ~/.claude/skills/sync-claude-export/
+   ```
+   If `~/.claude/skills/` didn't exist before, **restart Claude Code** so it picks up the
+   new skills folder. Copying it into a single project's `.claude/skills/` instead works
+   too, but then it's only usable from that one project.
 2. Copy `config.example.json` to `config.json` (same folder) and fill in real `raw_dir` /
    `parsed_dir` paths for where you want the archive to live: a folder *outside* any git
    repo. Forward slashes work fine even on Windows and avoid JSON backslash-escaping
-   mistakes (e.g. `"C:/Users/you/ClaudeAI-Sync/raw"`).
+   mistakes (e.g. `"C:/Users/you/ClaudeAI-Sync/raw"`). On macOS use something like
+   `"/Users/you/ClaudeAI-Sync/raw"` and `"/Users/you/ClaudeAI-Sync/parsed"`.
+   **macOS: avoid `~/Documents` and `~/Desktop`.** If iCloud "Desktop & Documents" sync is
+   on (check with `defaults read com.apple.finder FXICloudDriveDocuments`; `1` means on),
+   anything you put there is uploaded to iCloud, including your full conversation history.
+   A folder directly under your home directory, like `~/ClaudeAI-Sync`, is not synced.
 3. Trigger a claude.ai data export (Settings → Privacy → Export Data; web/desktop only,
    not available from the mobile app) and then just ask Claude Code to run the
-   `sync-claude-export` skill. It handles finding the export-ready email, downloading each
-   category, and parsing everything into the archive. **Run the skill the same day**:
+   `sync-claude-export` skill. With the `claude-in-chrome` connector, Claude can click
+   through that export for you too. It handles finding the export-ready email, downloading
+   each category, and parsing everything into the archive. **Run the skill the same day**:
    the emailed download link expires 24 hours after delivery.
 
 See `SKILL.md` for the authoritative, exact step-by-step Claude Code follows. This README
@@ -109,6 +122,26 @@ connected to a different account than the one you exported from.
 Both require claude.ai subscription login (`/login`), not API-key auth. See
 [Prerequisites](#prerequisites--requirements). Unset `ANTHROPIC_API_KEY` and re-authenticate.
 
+**`claude-in-chrome` is installed, but Claude says browser tools aren't available.**
+Enabling it is a two-step process: run `/chrome` in Claude Code (a slash command; typing
+`! /chrome` sends it to the shell and fails), then fully quit and relaunch Claude Code.
+Running `/chrome` alone prints nothing and doesn't add the tools to the running session.
+Confirm it worked by asking Claude to list its Chrome tabs.
+
+**`python: command not found` (macOS / Linux).**
+There's no bare `python` on stock macOS. Use `python3`, which is what `SKILL.md`'s commands
+need on those platforms. No separate install is required if `python3 --version` works.
+
+**The skill doesn't appear after installing it.**
+Claude Code only watches skills folders that existed when it started. If you just created
+`~/.claude/skills/`, restart Claude Code.
+
+**A tab-group error, or a blank "New tab" left behind, during the download step.**
+With `claude-in-chrome`, closing the original tab of the automation group and then
+navigating in a tab created earlier can fail with "not in Claude's tab group". The failed
+navigation happens before the page loads, so the one-time link isn't consumed. Retry with
+a fresh tab (see `SKILL.md` Part A step 4). A stray blank tab can be closed by hand.
+
 **Opening the download link just shows an HTML/login page (`FALLBACK_NEEDED`).**
 This isn't a bug. It's expected on some accounts (e.g. certain SSO setups). Ask Claude to
 fall back to the manual path: download the file yourself from the email link and hand
@@ -127,6 +160,12 @@ instead, e.g. `"C:/Users/you/ClaudeAI-Sync/raw"`. `pathlib` accepts these fine o
 That field is an explicit heuristic guess, not a confirmed link. Occasional incidental
 matches are expected, and the field is never used to move or merge files, only to annotate.
 
+**A conversation I know is inside a claude.ai Project shows up under `standalone/`.**
+Expected. The export has no conversation-to-project link at all, so *every* conversation
+lands in `standalone/`, whether or not it lives in a Project in claude.ai. "Standalone" here
+means "no known link", not "not in a project". Use the `related_projects` field (a name-match
+guess) or check claude.ai itself to see where a chat actually lives.
+
 **Two projects/design-chats share a name. Did one overwrite the other?**
 No. Folders are suffixed with each project's own short ID specifically to prevent this,
 verified against real exports with zero collisions.
@@ -139,8 +178,27 @@ makes sense if you deliberately want it scoped to that one project.
 ## Known limitations & roadmap
 
 Tracked as [GitHub Issues](https://github.com/airudah2000/sync-claude-export/issues).
-Currently just verifying macOS/Linux support on real hardware, since development so far
-has been Windows-only.
+Linux, and the `open` / `xdg-open` fallback for machines without `claude-in-chrome`, are
+still unverified on real hardware.
+
+### Doc conventions (keep the docs cross-platform)
+
+- **Forward slashes only in paths**, in prose, commands and JSON (`"C:/Users/you/..."`,
+  `"/Users/you/..."`). They work on Windows and macOS/Linux alike; backslashes break on
+  macOS/Linux and need escaping in JSON. Use `pathlib` in code, never a hard-coded separator.
+- **Label anything OS-specific** (`python` vs `python3`, `open` / `xdg-open` / `Start-Process`)
+  instead of assuming one platform.
+- Before committing a docs change, searching `README.md` and `SKILL.md` for the backslash
+  character should find nothing.
+
+### Platform support
+
+| Platform | Status |
+|---|---|
+| Windows + Chrome via `claude-in-chrome` | Verified (original development platform). |
+| macOS + Chrome via `claude-in-chrome` | Verified end to end on 2026-09-22: macOS 15.6.1 (Intel), Python 3.14.4, Chrome. Export trigger, email lookup, all 5 category downloads, `fetch`, all `parse-*` commands, `index-code-sessions`, and `cleanup-downloads`. Re-runs were idempotent. Filenames containing emoji and curly quotes wrote fine on APFS. |
+| macOS/Linux with only `open` / `xdg-open` | Not yet verified. Leaves download tabs open. |
+| Linux | Not yet verified. |
 
 ## Privacy
 
@@ -148,6 +206,10 @@ The generated archive contains your real personal conversation history. `config.
 (which points at that archive's real location) is already gitignored. Never commit it.
 If the archive folder itself ever ends up inside a git repo for any reason, gitignore it
 too; it isn't meant to be checked in anywhere.
+
+On macOS, also keep the archive out of iCloud-synced folders (`~/Documents`, `~/Desktop`
+when "Desktop & Documents" sync is on), or it will be uploaded to iCloud. Similarly, don't
+place it in a Dropbox, OneDrive or Google Drive folder unless you intend it to sync.
 
 ## License
 
