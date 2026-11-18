@@ -57,21 +57,60 @@ conversation history. If it ever ends up inside a git repo, make sure it's gitig
      search each time until the ready email appears. Tell the user once, up front, that
      you'll check back automatically rather than asking them to remind you.
    - **Neither email found:** only now trigger an export (Settings -> Privacy -> Export Data
-     on claude.ai web; not available on mobile). Confirm with the user first, since it starts
-     an export of their whole account and emails them. **If the `claude-in-chrome` connector
-     is available you can do this yourself** (verified on macOS; the browser must already be
-     logged in to claude.ai):
-     1. Open `https://claude.ai/settings/data-privacy-controls` in a tab. It opens the
-        Settings modal (the URL becomes `claude.ai/new#settings/data-privacy-controls`).
-        If the panel is still a loading skeleton, wait a couple of seconds.
-     2. `find` the "Export data" button in the "Your data" section and click it.
-     3. The export panel has a **"Conversations from" range selector (All / 30 days / 90
-        days / Custom), defaulting to All.** Use All for a first sync. The panel lists only
-        "Conversations, Users, Projects", but the resulting manifest still contained all 5
-        category files (memories and design chats included).
-     4. Click "Export". An "Export started" toast confirms it. Close the tab, then go back
-        to the Gmail search (the "in progress" email arrives within seconds).
-     Otherwise, ask the user to do these steps themselves.
+     on claude.ai web; not available on mobile). **Get the user's confirmation before you
+     open the panel, not partway through**, since it starts an export of their whole account
+     and emails them. Mid-flow pauses break the run: see the expiry note in step 3 below.
+
+     With the `claude-in-chrome` connector available and the browser already logged in to
+     claude.ai, Claude can drive all of this **except the verification code**. Expect to hand
+     back to the user once, in the middle. The flow below is verified on Windows 11 / Chrome
+     (2026-11-17) and supersedes the shorter macOS-only version: the macOS run never hit the
+     verification step, so don't treat its "click Export and you're done" as the whole story.
+
+     1. **Open the Privacy panel.** Navigate to `https://claude.ai/new`, wait for it to load,
+        then navigate to `https://claude.ai/new#settings/data-privacy-controls`. Two traps:
+        - **`https://claude.ai/settings/...` does not work.** `claude-in-chrome` refuses it
+          with "This site is not allowed due to safety restrictions." Only the `/new#settings/`
+          hash form gets through. (`claude.ai/new` itself is fine, so this is a path-level
+          block, not a domain-level one.)
+        - **The hash route only works warm.** Navigating straight to the hash URL in a cold
+          tab just loads the normal new-session page with no modal. Load `claude.ai/new`
+          first, *then* navigate to the hash.
+        After the hash navigation, wait ~2s and `find` the "Export data" button. On a first
+        `find` it is often not there yet; one short wait and a retry is normal, not a failure.
+     2. **Open the export panel.** Click "Export data" in the "Your data" section. The URL
+        becomes `.../data-privacy-controls/export-data`. The panel has a **"Conversations
+        from" range selector (All / 30 days / 90 days / Custom), defaulting to All.** Use All
+        for a first sync. It lists only "Conversations, Users, Projects", but the resulting
+        manifest still contained all 5 category files (memories and design chats included).
+     3. **Click "Export". Expect step-up auth, not success.** claude.ai answers with a
+        **"Confirm it's you"** dialog offering to email an 8-digit code. Two timers matter
+        here, and both have caused a failed run:
+        - The **challenge** behind the dialog goes stale within a couple of minutes. Leaving
+          the dialog open while you ask the user something produced an instant
+          `This code expired. Close this and try again to get a new one.` on the very first
+          "Send code" click. Click through Export -> Send code in one unbroken run.
+        - The **code itself** expires 5 minutes after sending.
+        So: confirm with the user *first* (step above), then run the panel without pausing.
+     4. **Hand the code entry to the user. Do not type it yourself.** Click "Send code",
+        then tell the user to enter the 8 digits in the open tab and click Continue. A
+        one-time authentication code is the user's to enter even if they offer it to you in
+        chat; the whole point of the step is confirming a human is present. If the Gmail
+        connector happens to be on the same account you can tell them it has arrived, but the
+        typing stays theirs.
+     5. **Click "Export" a second time. This is the step that actually starts the export.**
+        Entering the code only verifies the session: the dialog closes back to the *Privacy*
+        root panel, shows **no toast**, and **no export is queued**. Confirmed on Windows by
+        a first attempt that produced no email at all. Re-open "Export data" and click
+        "Export" again; now verified, it goes straight through with no second challenge.
+     6. **Confirm by the toast, never by the absence of an error.** Success looks like an
+        **"Export started"** toast in the bottom-right corner. claude.ai surfaces no
+        in-progress state anywhere in the Settings UI, so that toast plus the "in progress"
+        email are the only evidence you get. If you did not see the toast, the export did not
+        start, whatever else the page did.
+     Then close the tab and go back to the Gmail search.
+
+     If `claude-in-chrome` is unavailable, ask the user to do these steps themselves.
 
    **Export size/speed varies a lot between runs, this is normal, not a bug:** the first-ever
    export for an account tends to return all ~5 category files (`light_metadata`, `projects`,
