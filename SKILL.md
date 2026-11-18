@@ -131,6 +131,17 @@ conversation history. If it ever ends up inside a git repo, make sure it's gitig
    itself isn't available at all (connector not connected), skip straight to asking the user
    to paste the "Download data" link directly from the email themselves.
 
+   **Check which account the connector is actually on before trusting a zero-result search.**
+   A Gmail connector authenticated to a different address than the claude.ai account returns
+   a clean empty result, which looks exactly like "no export was triggered" but is not. Seen
+   on 2026-11-17: the connector was on a work address while claude.ai sent the export mail to
+   the user's personal Gmail, so every search came back empty while the export was genuinely
+   running. A cheap tell: search the connected mailbox for anything at all from the last day
+   and look at the `toRecipients` on whatever comes back. The "Confirm it's you" dialog in
+   step 1 also shows the masked destination address, and that is the address the export mail
+   goes to as well. If the two disagree, say so plainly and ask the user either to paste the
+   "Download data" link themselves or to reconnect the connector. Don't keep re-searching.
+
 3. **Extract the "Download data" link.** `get_thread` on the chosen thread, then find the
    `https://claude.ai/export/.../download/...` URL in the body (it's the "Download data"
    button href). Confirm with the user if ambiguous. Pass `messageFormat: PLAIN_TEXT` if
